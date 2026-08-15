@@ -170,3 +170,187 @@ export function inviteCode(): string {
   crypto.getRandomValues(buf);
   return Array.from(buf, (b) => chars[b % chars.length]).join("");
 }
+
+/* ============================================================
+ * The betting engine + hand evaluator. Pure functions — no IO — so the exact
+ * same rules can (later) run client-side for in-person/vs-computer modes.
+ * The Edge Functions (start-hand, act) load state, call these, and persist.
+ * ============================================================ */
+
+// Seats of players still in the hand, ascending.
+export function handSeats(players: GamePlayer[]): number[] {
+  return players.filter((p) => p.in_hand).map((p) => p.seat).sort((a, b) => a - b);
+}
+
+// The next in-hand seat clockwise (increasing, wrapping) after `fromSeat` that
+// satisfies `pred`. `fromSeat` itself is only considered last. null if none.
+export function nextSeat(
+  players: GamePlayer[],
+  fromSeat: number,
+  pred: (p: GamePlayer) => boolean,
+): number | null {
+  const seats = handSeats(players);
+  if (!seats.length) return null;
+  const after = seats.filter((s) => s > fromSeat);
+  const wrap = seats.filter((s) => s <= fromSeat);
+  for (const s of [...after, ...wrap]) {
+    const p = players.find((x) => x.seat === s)!;
+    if (pred(p)) return s;
+  }
+  return null;
+}
+
+export const notDone = (p: GamePlayer) => !p.has_folded && !p.is_all_in;
+
+// Whose action is it after `fromSeat`? First player who still needs to act:
+// not folded, not all-in, and either hasn't acted or is short of the current bet.
+export function nextToAct(players: GamePlayer[], fromSeat: number, currentBet: number): number | null {
+  return nextSeat(players, fromSeat, (p) => notDone(p) && (!p.has_acted || p.street_bet < currentBet));
+}
+
+// A betting round is closed when nobody still needs to act.
+export function roundClosed(players: GamePlayer[], currentBet: number): boolean {
+  return !players.some((p) => p.in_hand && notDone(p) && (!p.has_acted || p.street_bet < currentBet));
+}
+
+export function turnDeadline(mode: "live" | "async"): string {
+  const ms = mode === "live" ? 60_000 : 48 * 3600_000;
+  return new Date(Date.now() + ms).toISOString();
+}
+
+export const STREET_ORDER = ["preflop", "flop", "turn", "river", "showdown"] as const;
+export function nextStreet(s: string): string {
+  const i = STREET_ORDER.indexOf(s as typeof STREET_ORDER[number]);
+  return STREET_ORDER[Math.min(i + 1, STREET_ORDER.length - 1)];
+}
+// How many community cards are shown on a given street.
+export function boardCount(street: string): number {
+  return street === "flop" ? 3 : street === "turn" ? 4 : street === "river" || street === "showdown" ? 5 : 0;
+}
+
+/* ---------------- 7-card hand evaluator ----------------
+ * Returns a comparable score array [category, ...tiebreakers] (bigger = better)
+ * plus a human-readable name. Categories: 0 high card … 8 straight flush.
+ * Evaluates the best 5 of 7 by trying all 21 five-card subsets (cheap + safe).
+ */
+const CATEGORY_NAMES = [
+  "High card", "Pair", "Two pair", "Three of a kind", "Straight",
+  "Flush", "Full house", "Four of a kind", "Straight flush",
+];
+
+// rankValue: 2..14 (A high). card%13: 0->2 … 12->A(14).
+const rankVal = (card: number): number => (card % 13) + 2;
+
+function score5(cards: number[]): number[] {
+  const rv = cards.map(rankVal).sort((a, b) => b - a);        // desc
+  const suits = cards.map((c) => Math.floor(c / 13));
+  const isFlush = suits.every((s) => s === suits[0]);
+
+  const uniq = [...new Set(rv)].sort((a, b) => b - a);
+  let straightHigh = 0;
+  if (uniq.length === 5) {
+    if (uniq[0] - uniq[4] === 4) straightHigh = uniq[0];
+    // wheel: A-2-3-4-5 (ace plays low)
+    else if (uniq[0] === 14 && uniq[1] === 5 && uniq[2] === 4 && uniq[3] === 3 && uniq[4] === 2) straightHigh = 5;
+  }
+
+  const cnt: Record<number, number> = {};
+  for (const r of rv) cnt[r] = (cnt[r] ?? 0) + 1;
+  // groups sorted by count desc, then rank desc
+  const groups = Object.entries(cnt)
+    .map(([r, c]) => [c, Number(r)] as [number, number])
+    .sort((a, b) => b[0] - a[0] || b[1] - a[1]);
+  const counts = groups.map((g) => g[0]);
+  const ranksByCount = groups.map((g) => g[1]);
+  const isStraight = straightHigh > 0;
+
+  if (isStraight && isFlush) return [8, straightHigh];
+  if (counts[0] === 4) return [7, ranksByCount[0], ranksByCount[1]];
+  if (counts[0] === 3 && counts[1] === 2) return [6, ranksByCount[0], ranksByCount[1]];
+  if (isFlush) return [5, ...rv];
+  if (isStraight) return [4, straightHigh];
+  if (counts[0] === 3) return [3, ...ranksByCount];
+  if (counts[0] === 2 && counts[1] === 2) return [2, ranksByCount[0], ranksByCount[1], ranksByCount[2]];
+  if (counts[0] === 2) return [1, ...ranksByCount];
+  return [0, ...rv];
+}
+
+export function compareScore(a: number[], b: number[]): number {
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0);
+    if (d !== 0) return d; // >0 => a wins
+  }
+  return 0;
+}
+
+export interface HandResult { score: number[]; name: string }
+
+export function evaluate7(cards: number[]): HandResult {
+  let best: number[] | null = null;
+  // choose 5 of 7 == drop 2 of 7
+  for (let i = 0; i < cards.length; i++) {
+    for (let j = i + 1; j < cards.length; j++) {
+      const five = cards.filter((_, k) => k !== i && k !== j);
+      const s = score5(five);
+      if (!best || compareScore(s, best) > 0) best = s;
+    }
+  }
+  const score = best ?? [0];
+  return { score, name: CATEGORY_NAMES[score[0]] };
+}
+
+/* ---------------- side pots ----------------
+ * contribs: every player who put chips in this hand, with how much and whether
+ * they folded. Returns pots from main to last side pot; each pot lists the seats
+ * eligible to win it (non-folded contributors at that level).
+ */
+export interface Contribution { seat: number; amount: number; folded: boolean }
+export interface Pot { amount: number; eligible: number[] }
+
+export function buildSidePots(contribs: Contribution[]): Pot[] {
+  const pots: Pot[] = [];
+  let remaining = contribs.filter((c) => c.amount > 0).map((c) => ({ ...c }));
+  while (remaining.length) {
+    const min = Math.min(...remaining.map((c) => c.amount));
+    const amount = min * remaining.length;
+    const eligible = remaining.filter((c) => !c.folded).map((c) => c.seat).sort((a, b) => a - b);
+    // Merge into the previous pot if the eligible set is identical (cleaner display).
+    const prev = pots[pots.length - 1];
+    if (prev && prev.eligible.length === eligible.length && prev.eligible.every((s, i) => s === eligible[i])) {
+      prev.amount += amount;
+    } else if (eligible.length) {
+      pots.push({ amount, eligible });
+    } else if (prev) {
+      prev.amount += amount; // dead chips (all folded at this level) roll forward
+    }
+    remaining = remaining.map((c) => ({ ...c, amount: c.amount - min })).filter((c) => c.amount > 0);
+  }
+  return pots;
+}
+
+// Split a pot among winners; odd chips go to the earliest seat left of the button.
+export function splitPot(amount: number, winnerSeats: number[], buttonSeat: number): Record<number, number> {
+  const out: Record<number, number> = {};
+  const n = winnerSeats.length;
+  if (!n) return out;
+  const share = Math.floor(amount / n);
+  let odd = amount - share * n;
+  // order winners by seat distance clockwise from the button (earliest first)
+  const ordered = [...winnerSeats].sort((a, b) => seatDistance(buttonSeat, a) - seatDistance(buttonSeat, b));
+  for (const s of ordered) {
+    out[s] = share + (odd > 0 ? 1 : 0);
+    if (odd > 0) odd--;
+  }
+  return out;
+}
+
+function seatDistance(fromSeat: number, seat: number): number {
+  // clockwise distance 1..10 (seat just left of button = 1)
+  return ((seat - fromSeat + 10 - 1) % 10) + 1;
+}
+
+// Card name helpers for hand descriptions ("A♠ K♦").
+export function cardsName(cards: number[]): string {
+  return cards.map(cardName).join(" ");
+}

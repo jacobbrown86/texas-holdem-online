@@ -30,11 +30,12 @@ Deno.serve(async (req) => {
   });
   if (!claimed) return json({ error: "Table state changed, try again" }, 409);
 
-  // Refund virtual chips players bought in with. Ledger/none stakes are settled
-  // by humans, so there's nothing to reverse there.
+  // Cash each player's current stack back to their chip balance (whatever is in
+  // front of them right now — buy-in in the lobby, or their standing stack once
+  // hands have been played). Ledger/none stakes are settled by humans off-app.
   if (game.stake_type === "chips") {
     for (const p of players) {
-      if (p.total_bet > 0) await adjustChips(admin, p.player_id, p.total_bet);
+      if (p.stack > 0) await adjustChips(admin, p.player_id, p.stack);
     }
   }
 

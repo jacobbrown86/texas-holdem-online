@@ -1,16 +1,15 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
-import {
-  createGame, joinGame, startHand, cancelGame, leaveTable, invitePlayer,
-} from "../lib/api";
+import { joinGame, startHand, act, cancelGame, leaveTable, invitePlayer } from "../lib/api";
 import { useAuth } from "../auth/AuthProvider";
 import { Felt, Marquee, Panel } from "../components/Marquee";
 import LobbyView from "../game/LobbyView";
+import PlayView from "../game/PlayView";
 import Chat from "../game/Chat";
 
 const PLAYER_SELECT =
-  "seat, stack, status, player_id, profile:profiles(username, avatar_seed)";
+  "seat, stack, status, in_hand, has_folded, street_bet, has_acted, is_all_in, player_id, profile:profiles(username, avatar_seed)";
 
 export default function GameRoom() {
   const { code } = useParams();
@@ -20,6 +19,8 @@ export default function GameRoom() {
 
   const [game, setGame] = useState(null);
   const [players, setPlayers] = useState([]);
+  const [myHole, setMyHole] = useState(null);
+  const [showdowns, setShowdowns] = useState([]);
   const [phase, setPhase] = useState("loading"); // loading | ready | notfound | error
   const [error, setError] = useState("");
   const [dealing, setDealing] = useState(false);
@@ -27,9 +28,9 @@ export default function GameRoom() {
   const [copied, setCopied] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
-  const [recent, setRecent] = useState([]); // usernames I've played with before
-  const [invited, setInvited] = useState({}); // username -> "sent" | error message
-  const [pendingInvites, setPendingInvites] = useState([]); // usernames invited to this game
+  const [recent, setRecent] = useState([]);
+  const [invited, setInvited] = useState({});
+  const [pendingInvites, setPendingInvites] = useState([]);
 
   const gameIdRef = useRef(null);
   const refreshProfileRef = useRef(refreshProfile);
@@ -40,9 +41,25 @@ export default function GameRoom() {
       supabase.from("games").select("*").eq("id", gameId).single(),
       supabase.from("game_players").select(PLAYER_SELECT).eq("game_id", gameId).order("seat"),
     ]);
-    if (g) setGame(g);
+    if (g) {
+      setGame(g);
+      // My private hole cards for the current hand (RLS: only my own row).
+      if (g.hand_no > 0) {
+        const [{ data: hc }, { data: sd }] = await Promise.all([
+          supabase.from("hole_cards").select("cards")
+            .eq("game_id", gameId).eq("player_id", user.id).eq("hand_no", g.hand_no).maybeSingle(),
+          supabase.from("showdowns").select("player_id, cards, hand_rank, won")
+            .eq("game_id", gameId).eq("hand_no", g.hand_no),
+        ]);
+        setMyHole(hc?.cards ?? null);
+        setShowdowns(sd ?? []);
+      } else {
+        setMyHole(null);
+        setShowdowns([]);
+      }
+    }
     if (ps) setPlayers(ps);
-  }, []);
+  }, [user.id]);
 
   const loadInvites = useCallback(async (gid) => {
     const { data } = await supabase
@@ -83,15 +100,11 @@ export default function GameRoom() {
 
       channel = supabase
         .channel(`game:${g.id}`)
-        .on("postgres_changes",
-          { event: "*", schema: "public", table: "game_players", filter: `game_id=eq.${g.id}` },
-          () => reload(g.id))
-        .on("postgres_changes",
-          { event: "*", schema: "public", table: "games", filter: `id=eq.${g.id}` },
-          () => reload(g.id))
-        .on("postgres_changes",
-          { event: "*", schema: "public", table: "invites", filter: `game_id=eq.${g.id}` },
-          () => loadInvites(g.id))
+        .on("postgres_changes", { event: "*", schema: "public", table: "game_players", filter: `game_id=eq.${g.id}` }, () => reload(g.id))
+        .on("postgres_changes", { event: "*", schema: "public", table: "games", filter: `id=eq.${g.id}` }, () => reload(g.id))
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "actions", filter: `game_id=eq.${g.id}` }, () => reload(g.id))
+        .on("postgres_changes", { event: "*", schema: "public", table: "hole_cards", filter: `game_id=eq.${g.id}` }, () => reload(g.id))
+        .on("postgres_changes", { event: "*", schema: "public", table: "invites", filter: `game_id=eq.${g.id}` }, () => loadInvites(g.id))
         .subscribe();
     })();
 
@@ -101,59 +114,41 @@ export default function GameRoom() {
     };
   }, [upperCode, reload, loadInvites]);
 
-  // People I've played with before, for one-tap invites in the lobby.
+  // Recent co-players for one-tap invites.
   useEffect(() => {
     let active = true;
     (async () => {
-      const { data: mine } = await supabase
-        .from("game_players").select("game_id").eq("player_id", user.id);
+      const { data: mine } = await supabase.from("game_players").select("game_id").eq("player_id", user.id);
       const ids = (mine ?? []).map((r) => r.game_id);
       if (!ids.length || !active) return;
       const { data: co } = await supabase
-        .from("game_players")
-        .select("player_id, profile:profiles(username)")
-        .in("game_id", ids)
-        .neq("player_id", user.id);
+        .from("game_players").select("player_id, profile:profiles(username)")
+        .in("game_id", ids).neq("player_id", user.id);
       if (!active) return;
       const seen = new Set();
       const list = [];
       for (const r of co ?? []) {
-        if (r.profile?.username && !seen.has(r.player_id)) {
-          seen.add(r.player_id);
-          list.push(r.profile.username);
-        }
+        if (r.profile?.username && !seen.has(r.player_id)) { seen.add(r.player_id); list.push(r.profile.username); }
       }
       setRecent(list.slice(0, 12));
     })();
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [user.id]);
 
-  // Safety-net sync while the table is live (phones drop the realtime socket).
+  // Safety-net poll + resync on foreground while a table is live.
   useEffect(() => {
     const s = game?.status;
     if (!s || s === "finished" || s === "abandoned") return;
-    const id = setInterval(() => {
-      if (gameIdRef.current) reload(gameIdRef.current);
-    }, 3000);
-    return () => clearInterval(id);
-  }, [game?.status, reload]);
-
-  // Resync when the app returns to the foreground.
-  useEffect(() => {
-    const onWake = () => {
-      if (document.visibilityState === "visible" && gameIdRef.current) reload(gameIdRef.current);
-    };
+    const id = setInterval(() => { if (gameIdRef.current) reload(gameIdRef.current); }, 3000);
+    const onWake = () => document.visibilityState === "visible" && gameIdRef.current && reload(gameIdRef.current);
     document.addEventListener("visibilitychange", onWake);
     window.addEventListener("focus", onWake);
-    window.addEventListener("pageshow", onWake);
     return () => {
+      clearInterval(id);
       document.removeEventListener("visibilitychange", onWake);
       window.removeEventListener("focus", onWake);
-      window.removeEventListener("pageshow", onWake);
     };
-  }, [reload]);
+  }, [game?.status, reload]);
 
   async function invite(username) {
     const name = username.trim();
@@ -168,26 +163,9 @@ export default function GameRoom() {
   }
 
   const shareUrl = `${window.location.origin}/g/${upperCode}`;
-
-  async function copyLink() {
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked — link is on screen */
-    }
-  }
-
-  async function copyCode() {
-    try {
-      await navigator.clipboard.writeText(upperCode);
-      setCopiedCode(true);
-      setTimeout(() => setCopiedCode(false), 1500);
-    } catch {
-      /* clipboard blocked — code is on screen */
-    }
-  }
+  const copy = async (text, setFlag) => {
+    try { await navigator.clipboard.writeText(text); setFlag(true); setTimeout(() => setFlag(false), 1500); } catch { /* on screen */ }
+  };
 
   async function deal() {
     setError(""); setDealing(true);
@@ -195,14 +173,22 @@ export default function GameRoom() {
       await startHand(gameIdRef.current);
       await reload(gameIdRef.current);
     } catch (err) {
-      // start-hand is built next session (Phase 3). Until then, surface a clear note.
-      setError(
-        /not found|Failed to send|non-2xx/i.test(err.message)
-          ? "Dealing is built next session (Phase 3). The lobby is fully working — seats and buy-ins are live."
-          : err.message,
-      );
+      setError(err.message);
     } finally {
       setDealing(false);
+    }
+  }
+
+  async function doAct(action, amount) {
+    setError(""); setBusy(true);
+    try {
+      await act(gameIdRef.current, action, amount);
+      await reload(gameIdRef.current);
+    } catch (err) {
+      setError(err.message);
+      await reload(gameIdRef.current);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -213,23 +199,16 @@ export default function GameRoom() {
       await cancelGame(gameIdRef.current);
       await refreshProfile();
       navigate("/");
-    } catch (err) {
-      setError(err.message);
-      setBusy(false);
-    }
+    } catch (err) { setError(err.message); setBusy(false); }
   }
 
   async function doLeave() {
-    setConfirmLeave(false);
-    setError(""); setBusy(true);
+    setConfirmLeave(false); setError(""); setBusy(true);
     try {
       await leaveTable(gameIdRef.current);
       await refreshProfile();
       navigate("/");
-    } catch (err) {
-      setError(err.message);
-      setBusy(false);
-    }
+    } catch (err) { setError(err.message); setBusy(false); }
   }
 
   /* ---------- render ---------- */
@@ -242,55 +221,41 @@ export default function GameRoom() {
           {phase === "loading" && <p className="hint">Joining table {upperCode}…</p>}
           {phase === "notfound" && <p className="hint">That invite code doesn't match any table.</p>}
           {phase === "error" && <p className="errText">{error}</p>}
-          {phase !== "loading" && (
-            <button className="ghost" onClick={() => navigate("/")}>BACK TO HOME</button>
-          )}
+          {phase !== "loading" && <button className="ghost" onClick={() => navigate("/")}>BACK TO HOME</button>}
         </Panel>
       </Felt>
     );
   }
 
   const me = players.find((p) => p.player_id === user.id);
-  const inPlay = game.status === "active";
+  const isHost = game.created_by === user.id;
 
   return (
     <Felt>
-      <Marquee bottom={`TABLE ${upperCode}`} winner={game.status === "finished"} />
+      <Marquee bottom={`TABLE ${upperCode}`} winner={game.status === "active" && game.street === "idle"} />
 
       {game.status === "lobby" && (
         <LobbyView
           code={upperCode} game={game} players={players} meId={user.id}
-          shareUrl={shareUrl} copied={copied} onCopy={copyLink}
-          copiedCode={copiedCode} onCopyCode={copyCode}
+          shareUrl={shareUrl} copied={copied} onCopy={() => copy(shareUrl, setCopied)}
+          copiedCode={copiedCode} onCopyCode={() => copy(upperCode, setCopiedCode)}
           onDeal={deal} dealing={dealing} error={error}
           onCancel={cancel} busy={busy} onHome={() => navigate("/")} onLeave={() => setConfirmLeave(true)}
           recent={recent} invited={invited} onInvite={invite} pendingInvites={pendingInvites}
         />
       )}
 
-      {inPlay && (
-        <Panel title="Hand in progress">
-          <p className="hint">
-            The dealing and betting engine arrives next session (Phase 3). This lobby
-            is the milestone for today — seats fill live and buy-ins are deducted.
-          </p>
-          <button className="ghost" onClick={() => navigate("/")}>← BACK TO HOME</button>
-        </Panel>
+      {game.status === "active" && (
+        <PlayView
+          game={game} players={players} me={me} myHole={myHole} showdowns={showdowns}
+          onAct={doAct} onNextHand={deal} busy={busy || dealing} isHost={isHost} error={error}
+          onHome={() => navigate("/")} onLeave={() => setConfirmLeave(true)}
+        />
       )}
 
       {game.status === "abandoned" && (
         <Panel title="Table cancelled">
-          <p className="hint">
-            The host cancelled this table.
-            {game.stake_type === "chips" ? " Any chips you bought in are refunded." : ""}
-          </p>
-          <button className="ghost" onClick={() => navigate("/")}>← BACK TO HOME</button>
-        </Panel>
-      )}
-
-      {game.status === "finished" && (
-        <Panel title="Table finished">
-          <p className="hint">This table has wrapped up.</p>
+          <p className="hint">The host cancelled this table.{game.stake_type === "chips" ? " Any chips you bought in are refunded." : ""}</p>
           <button className="ghost" onClick={() => navigate("/")}>← BACK TO HOME</button>
         </Panel>
       )}
@@ -304,14 +269,10 @@ export default function GameRoom() {
           <div className="panel" style={{ maxWidth: 380, width: "100%" }} onClick={(e) => e.stopPropagation()}>
             <div className="panelTitle">Leave table?</div>
             <p className="hint" style={{ marginTop: 0 }}>
-              The hand hasn't started, so your buy-in is returned.
+              {game.status === "lobby" ? "The hand hasn't started, so your buy-in is returned." : "You can leave between hands."}
             </p>
-            <button className="bigBtn hot" disabled={busy} onClick={doLeave} style={{ marginTop: 8 }}>
-              YES, LEAVE
-            </button>
-            <button className="ghost" onClick={() => setConfirmLeave(false)}>
-              NO, STAY
-            </button>
+            <button className="bigBtn hot" disabled={busy} onClick={doLeave} style={{ marginTop: 8 }}>YES, LEAVE</button>
+            <button className="ghost" onClick={() => setConfirmLeave(false)}>NO, STAY</button>
           </div>
         </div>
       )}

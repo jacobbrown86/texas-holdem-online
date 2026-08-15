@@ -50,6 +50,16 @@ Deno.serve(async (req) => {
     return json({ left: true, refunded: me.total_bet || 0 });
   }
 
-  // Active hand: cashing out mid-hand comes in Phase 5.
-  return json({ error: "You can't leave in the middle of a hand yet." }, 409);
+  // Between hands (table active, no hand dealt): cash the current stack out to
+  // chips and free the seat. (Cashing out DURING a live hand is Phase 5.)
+  if (game.street === "idle") {
+    if (game.stake_type === "chips" && me.stack > 0) {
+      await adjustChips(admin, userId, me.stack);
+    }
+    await admin.from("game_players").delete().eq("game_id", game.id).eq("player_id", userId);
+    return json({ left: true, cashed_out: me.stack });
+  }
+
+  // Mid-hand: leaving in the middle of a hand comes in Phase 5.
+  return json({ error: "You can't leave in the middle of a hand yet — wait for the hand to finish." }, 409);
 });

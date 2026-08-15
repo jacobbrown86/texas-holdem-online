@@ -423,3 +423,45 @@ input[readonly] { color:#c9d8c9; }
   border: 2px solid #c9a24b;
 }
 .card.muck { opacity: .4; }
+
+/* ================= gameplay (Phase 3) ================= */
+.card.small { width: 38px; height: 54px; padding: 3px 4px; border-radius: 6px; }
+.card.small .rank { font-size: 14px; } .card.small .suit { font-size: 12px; }
+.card.slot {
+  background: rgba(255,255,255,.05); border: 2px dashed rgba(201,162,75,.35);
+  box-shadow: none; width: 54px; height: 76px;
+}
+
+.seatRow {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 6px; border-bottom: 1px solid rgba(255,255,255,.07);
+}
+.seatRow:last-child { border-bottom: none; }
+.seatRow.turn { background: rgba(201,162,75,.15); border-radius: 8px; }
+.seatRow.folded { opacity: .5; }
+.seatWho { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.seatName { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seatStack { font-size: 12.5px; color: #ffd75a; font-family: 'Barlow Condensed'; letter-spacing: .5px; }
+.inFront { color: #a9c7b0; }
+.seatRank { font-size: 11px; color: #8fe094; font-family: 'Barlow Condensed'; letter-spacing: 1px; }
+.pBadge {
+  display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 8px;
+  font-size: 10px; font-weight: 700; font-family: 'Barlow Condensed'; letter-spacing: 1px;
+  background: rgba(201,162,75,.25); color: #f5efdc; vertical-align: middle;
+}
+.pBadge.d { background: #ffd75a; color: #241a0e; }
+.pBadge.allin { background: #d1401c; color: #fff; }
+.pBadge.fold { background: rgba(255,255,255,.15); color: #c9d8c9; }
+.seatCards { display: flex; gap: 4px; flex: none; }
+
+.myHole { text-align: center; }
+.myHole .cardRow { margin-top: 6px; }
+
+.actionBar { display: flex; flex-direction: column; gap: 10px; }
+.actRow { display: flex; gap: 10px; }
+.actRow .bigBtn { flex: 1; }
+.raiseHead { display: flex; justify-content: space-between; align-items: baseline; font-family: 'Barlow Condensed'; letter-spacing: 1px; color: #c9d8c9; }
+.raiseHead b { color: #ffd75a; font-size: 20px; }
+.actionBar input[type=range] { width: 100%; accent-color: #c9a24b; }
+.raiseQuick { display: flex; gap: 6px; }
+.raiseQuick .mini { flex: 1; height: 36px; }
