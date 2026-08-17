@@ -8,7 +8,8 @@ const STREET_LABEL = { preflop: "Preflop", flop: "Flop", turn: "Turn", river: "R
 // action bar. All betting math is validated server-side; this mirrors the legal
 // options for UX only.
 export default function PlayView({
-  game, players, me, myHole, showdowns = [], onAct, onNextHand, busy, isHost, error, onHome, onLeave,
+  game, players, me, myHole, showdowns = [], onAct, onNextHand, onRebuy, onEndTable,
+  busy, isHost, error, onHome, onLeave,
 }) {
   const live = ["preflop", "flop", "turn", "river"].includes(game.street);
   const betweenHands = game.street === "idle" && (game.winner_ids?.length ?? 0) > 0;
@@ -191,10 +192,23 @@ export default function PlayView({
               </p>
             );
           })()}
+          {me && me.stack === 0 && (
+            <>
+              <p className="hint" style={{ color: "#ff8a9a" }}>You're out of chips.</p>
+              <button className="bigBtn gold" disabled={busy} onClick={onRebuy}>
+                {busy ? "…" : `REBUY $${game.buy_in}`}
+              </button>
+            </>
+          )}
           {isHost ? (
-            <button className="bigBtn green" disabled={busy} onClick={onNextHand}>
-              {busy ? "DEALING…" : "DEAL NEXT HAND"}
-            </button>
+            <>
+              <button className="bigBtn green" disabled={busy} onClick={onNextHand}>
+                {busy ? "DEALING…" : "DEAL NEXT HAND"}
+              </button>
+              <button className="ghost" disabled={busy} onClick={onEndTable}>
+                END TABLE & SETTLE UP
+              </button>
+            </>
           ) : (
             <p className="hint">Waiting for the host to deal the next hand.</p>
           )}

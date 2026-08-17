@@ -24,6 +24,7 @@ export const createGame = (opts) => callFn("create-game", opts);
 export const joinGame = (invite_code) => callFn("join-game", { invite_code });
 export const cancelGame = (game_id) => callFn("cancel-game", { game_id });
 export const leaveTable = (game_id) => callFn("leave-table", { game_id });
+export const endTable = (game_id) => callFn("end-table", { game_id });
 export const invitePlayer = (game_id, username) => callFn("invite-player", { game_id, username });
 export const sendMessage = (game_id, body) => callFn("send-message", { game_id, body });
 

@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
-import { joinGame, startHand, act, cancelGame, leaveTable, invitePlayer } from "../lib/api";
+import { joinGame, startHand, act, rebuy, endTable, cancelGame, leaveTable, invitePlayer } from "../lib/api";
 import { useAuth } from "../auth/AuthProvider";
 import { Felt, Marquee, Panel } from "../components/Marquee";
 import LobbyView from "../game/LobbyView";
 import PlayView from "../game/PlayView";
+import FinishedView from "../game/FinishedView";
 import Chat from "../game/Chat";
 
 const PLAYER_SELECT =
@@ -192,6 +193,27 @@ export default function GameRoom() {
     }
   }
 
+  async function doRebuy() {
+    setError(""); setBusy(true);
+    try {
+      await rebuy(gameIdRef.current);
+      await refreshProfile();
+      await reload(gameIdRef.current);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  }
+
+  async function doEndTable() {
+    if (!window.confirm("End the table and settle up? Everyone's chips are cashed out.")) return;
+    setError(""); setBusy(true);
+    try {
+      await endTable(gameIdRef.current);
+      await refreshProfile();
+      await reload(gameIdRef.current);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  }
+
   async function cancel() {
     if (!window.confirm("Cancel this table for everyone? Chip buy-ins are refunded.")) return;
     setError(""); setBusy(true);
@@ -232,7 +254,7 @@ export default function GameRoom() {
 
   return (
     <Felt>
-      <Marquee bottom={`TABLE ${upperCode}`} winner={game.status === "active" && game.street === "idle"} />
+      <Marquee bottom={`TABLE ${upperCode}`} winner={game.status === "finished" || (game.status === "active" && game.street === "idle")} />
 
       {game.status === "lobby" && (
         <LobbyView
@@ -248,9 +270,14 @@ export default function GameRoom() {
       {game.status === "active" && (
         <PlayView
           game={game} players={players} me={me} myHole={myHole} showdowns={showdowns}
-          onAct={doAct} onNextHand={deal} busy={busy || dealing} isHost={isHost} error={error}
+          onAct={doAct} onNextHand={deal} onRebuy={doRebuy} onEndTable={doEndTable}
+          busy={busy || dealing} isHost={isHost} error={error}
           onHome={() => navigate("/")} onLeave={() => setConfirmLeave(true)}
         />
+      )}
+
+      {game.status === "finished" && (
+        <FinishedView game={game} players={players} me={me} onHome={() => navigate("/")} busy={busy} />
       )}
 
       {game.status === "abandoned" && (
