@@ -472,3 +472,28 @@ input[readonly] { color:#c9d8c9; }
   color: #ffd75a; background: rgba(0,0,0,.3); border-radius: 6px; padding: 1px 7px;
 }
 .clock.low { color: #fff; background: #d1401c; animation: hotPulse .7s infinite; }
+
+/* ---- deal / flip animations ---- */
+@keyframes dealIn {
+  from { opacity: 0; transform: translateY(-26px) scale(.7) rotate(-9deg); }
+  to   { opacity: 1; transform: none; }
+}
+.card.dealIn { animation: dealIn .38s cubic-bezier(.2,.9,.3,1.25) both; }
+
+@keyframes flipIn {
+  0%   { transform: perspective(500px) rotateY(90deg) scale(.92); opacity: .15; }
+  60%  { transform: perspective(500px) rotateY(-10deg) scale(1.03); opacity: 1; }
+  100% { transform: perspective(500px) rotateY(0) scale(1); }
+}
+.card.flipIn { animation: flipIn .5s ease-out both; backface-visibility: hidden; }
+
+@keyframes potBump {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.28); color: #fff; }
+  100% { transform: scale(1); }
+}
+.potAmt.bump { animation: potBump .45s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .card.dealIn, .card.flipIn, .potAmt.bump { animation: none; }
+}

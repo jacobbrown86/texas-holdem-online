@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Panel } from "../components/Marquee";
 import Card from "../components/Card";
 
@@ -39,6 +39,19 @@ export default function PlayView({
   const [raiseTo, setRaiseTo] = useState(minRaiseTo);
   useEffect(() => { setRaiseTo(minRaiseTo); }, [game.current_bet, game.street, game.current_seat, minRaiseTo]);
 
+  // Pulse the pot whenever it grows (chips landing in the middle).
+  const [potBump, setPotBump] = useState(false);
+  const prevPot = useRef(game.pot);
+  useEffect(() => {
+    if (game.pot > prevPot.current) {
+      setPotBump(true);
+      const t = setTimeout(() => setPotBump(false), 450);
+      prevPot.current = game.pot;
+      return () => clearTimeout(t);
+    }
+    prevPot.current = game.pot;
+  }, [game.pot]);
+
   const showdownBySeat = {};
   for (const s of showdowns) {
     const p = players.find((x) => x.player_id === s.player_id);
@@ -61,7 +74,7 @@ export default function PlayView({
       <div className="rail">
         <div className="potBox">
           <span className="potLbl">POT</span>
-          <span className="potAmt">${game.pot}</span>
+          <span className={"potAmt" + (potBump ? " bump" : "")}>${game.pot}</span>
         </div>
         <div className="leaders">
           <div className="leader">
@@ -80,11 +93,16 @@ export default function PlayView({
         </div>
       </div>
 
-      {/* Community board */}
+      {/* Community board — each new street's cards flip in on reveal */}
       <div className="panel">
         <div className="cardRow">
           {Array.from({ length: 5 }, (_, i) =>
-            game.board[i] != null ? <Card key={i} card={game.board[i]} /> : <div key={i} className="card slot" />,
+            game.board[i] != null ? (
+              <Card key={`c${game.hand_no}-${i}`} card={game.board[i]} flip
+                style={{ animationDelay: `${i < 3 ? i * 80 : 0}ms` }} />
+            ) : (
+              <div key={`s${i}`} className="card slot" />
+            ),
           )}
         </div>
       </div>
@@ -116,11 +134,14 @@ export default function PlayView({
               </div>
               <div className="seatCards">
                 {isMe ? (
-                  myHole ? myHole.map((c, i) => <Card key={i} card={c} small />) : null
+                  myHole ? myHole.map((c, i) => <Card key={`sm${game.hand_no}-${i}`} card={c} small deal style={{ animationDelay: `${i * 70}ms` }} />) : null
                 ) : reveal ? (
-                  reveal.cards.map((c, i) => <Card key={i} card={c} small />)
+                  reveal.cards.map((c, i) => <Card key={`sr${game.hand_no}-${i}`} card={c} small flip style={{ animationDelay: `${i * 90}ms` }} />)
                 ) : inHand ? (
-                  <><Card small down /><Card small down /></>
+                  <>
+                    <Card key={`sb${game.hand_no}-0`} small down deal />
+                    <Card key={`sb${game.hand_no}-1`} small down deal style={{ animationDelay: "70ms" }} />
+                  </>
                 ) : null}
               </div>
             </div>
@@ -133,7 +154,7 @@ export default function PlayView({
         <div className="panel myHole">
           <div className="panelSub" style={{ marginTop: 0 }}>Your hand{me.has_folded ? " (folded)" : ""}</div>
           <div className="cardRow">
-            {myHole.map((c, i) => <Card key={i} card={c} muck={me.has_folded} />)}
+            {myHole.map((c, i) => <Card key={`mh${game.hand_no}-${i}`} card={c} deal muck={me.has_folded} style={{ animationDelay: `${i * 90}ms` }} />)}
           </div>
         </div>
       )}
