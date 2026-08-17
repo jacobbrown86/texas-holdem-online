@@ -465,3 +465,10 @@ input[readonly] { color:#c9d8c9; }
 .actionBar input[type=range] { width: 100%; accent-color: #c9a24b; }
 .raiseQuick { display: flex; gap: 6px; }
 .raiseQuick .mini { flex: 1; height: 36px; }
+
+/* ---- turn clock ---- */
+.clock {
+  flex: none; font-family: 'Barlow Condensed'; font-weight: 700; font-size: 15px;
+  color: #ffd75a; background: rgba(0,0,0,.3); border-radius: 6px; padding: 1px 7px;
+}
+.clock.low { color: #fff; background: #d1401c; animation: hotPulse .7s infinite; }

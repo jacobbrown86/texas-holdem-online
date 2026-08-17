@@ -1,0 +1,32 @@
+-- ============================================================
+-- Turn timers: a scheduled job auto-folds (or auto-checks) a player who runs
+-- out the clock, so a live/async table never freezes on someone who walked away.
+--
+-- Each turn already stamps games.turn_deadline (live: +60s, async: +48h) in
+-- start-hand / act. This migration enables the extensions; the actual schedule
+-- is created separately (SETUP.md) because it needs the project URL + the
+-- CRON_SECRET, which shouldn't be committed to source.
+-- ============================================================
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+-- --- Scheduling template (run in the SQL editor, filling in your values) ------
+-- Set CRON_SECRET as an Edge Function secret first, and deploy timeout-sweep
+-- with --no-verify-jwt. Then:
+--
+--   select cron.schedule(
+--     'holdem-timeout-sweep',
+--     '* * * * *',                     -- every minute (finest pg_cron granularity)
+--     $$
+--       select net.http_post(
+--         url     := 'https://YOUR-REF.functions.supabase.co/timeout-sweep',
+--         headers := jsonb_build_object(
+--           'Content-Type', 'application/json',
+--           'x-cron-secret', 'YOUR-CRON-SECRET'
+--         )
+--       );
+--     $$
+--   );
+--
+-- To change or remove it later:
+--   select cron.unschedule('holdem-timeout-sweep');

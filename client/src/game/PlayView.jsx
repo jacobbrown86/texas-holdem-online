@@ -4,6 +4,20 @@ import Card from "../components/Card";
 
 const STREET_LABEL = { preflop: "Preflop", flop: "Flop", turn: "Turn", river: "River", showdown: "Showdown" };
 
+// Live countdown to the current player's turn_deadline. Only meaningful in live
+// mode (60s turns); async deadlines are 48h so we hide those.
+function Countdown({ deadline, mode }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (!deadline || mode !== "live") return null;
+  const secs = Math.max(0, Math.round((new Date(deadline).getTime() - Date.now()) / 1000));
+  if (secs > 60) return null;
+  return <span className={"clock" + (secs <= 10 ? " low" : "")}>{secs}s</span>;
+}
+
 // The live poker table: board, pot, seats, your private hole cards, and the
 // action bar. All betting math is validated server-side; this mirrors the legal
 // options for UX only.
@@ -61,6 +75,7 @@ export default function PlayView({
                 ? myTurn ? "Your action" : `Waiting for @${currentName ?? "…"}`
                 : betweenHands ? `Winner: ${winners.map(nameOf).join(" & ")}` : "Hand complete"}
             </span>
+            {live && <Countdown deadline={game.turn_deadline} mode={game.mode} />}
           </div>
         </div>
       </div>
