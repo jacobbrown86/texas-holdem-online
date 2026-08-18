@@ -497,3 +497,18 @@ input[readonly] { color:#c9d8c9; }
 @media (prefers-reduced-motion: reduce) {
   .card.dealIn, .card.flipIn, .potAmt.bump { animation: none; }
 }
+
+/* ---- in-person pass-and-hide gate ---- */
+.passGate {
+  position: fixed; inset: 0; z-index: 80; padding: 24px;
+  background: radial-gradient(ellipse at 50% 30%, #0a4d2e 0%, #06231a 80%);
+  display: flex; align-items: center; justify-content: center;
+}
+.passInner { text-align: center; max-width: 360px; width: 100%; }
+.passTitle { font-family: 'Barlow Condensed'; letter-spacing: 3px; color: #c9a24b; font-size: 16px; text-transform: uppercase; }
+.passName {
+  font-family: 'Limelight'; color: #ffd75a; font-size: clamp(32px, 11vw, 46px);
+  margin: 6px 0 14px; text-shadow: 0 2px 0 #7a5b16, 0 0 18px rgba(255,215,90,.5);
+  word-break: break-word;
+}
+.passInner .hint { margin-bottom: 20px; }
