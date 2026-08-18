@@ -173,10 +173,17 @@ export default function LocalGame() {
     const net = (p) => p.stack - p.total_bet;
     const best = Math.max(...players.map(net));
     const finGame = { ...game, winner_ids: players.filter((p) => net(p) === best).map((p) => p.player_id) };
+    const playAgainLocal = () => {
+      setRevealed(false);
+      setGs(startHand(newLocalGame({
+        names: gs.players.map((p) => p.name), bigBlind: gs.bigBlind, buyIn: gs.buyIn, mode: gs.mode,
+      })));
+    };
     return (
       <Felt>
         <Marquee bottom="GAME OVER" winner />
-        <FinishedView game={finGame} players={players} me={me} onHome={quit} busy={false} />
+        <FinishedView game={finGame} players={players} me={me} onHome={quit} busy={false}
+          onPlayAgain={playAgainLocal} isHost />
       </Felt>
     );
   }

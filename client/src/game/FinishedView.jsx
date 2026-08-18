@@ -3,7 +3,7 @@ import { Panel } from "../components/Marquee";
 // End-of-session settlement. Shows each player's net result (what they walked
 // away with minus what they bought in for). Chips already moved to balances;
 // ledger tables settle privately off-app.
-export default function FinishedView({ game, players, me, onHome, busy }) {
+export default function FinishedView({ game, players, me, onHome, busy, onPlayAgain, isHost }) {
   const winners = game.winner_ids ?? [];
   const net = (p) => p.stack - p.total_bet;
   const board = [...players].filter((p) => p.status !== "left").sort((a, b) => net(b) - net(a) || a.seat - b.seat);
@@ -70,6 +70,11 @@ export default function FinishedView({ game, players, me, onHome, busy }) {
         )}
       </Panel>
 
+      {onPlayAgain && isHost && (
+        <button className="bigBtn green" disabled={busy} onClick={onPlayAgain}>
+          {busy ? "SETTING UP…" : "🔁 PLAY AGAIN — SAME GROUP"}
+        </button>
+      )}
       <button className="ghost" disabled={busy} onClick={onHome}>← BACK TO HOME</button>
     </>
   );

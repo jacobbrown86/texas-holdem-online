@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
-import { joinGame, startHand, act, rebuy, endTable, cancelGame, leaveTable, invitePlayer } from "../lib/api";
+import { createGame, joinGame, startHand, act, rebuy, endTable, cancelGame, leaveTable, invitePlayer } from "../lib/api";
 import { useAuth } from "../auth/AuthProvider";
 import { Felt, Marquee, Panel } from "../components/Marquee";
 import LobbyView from "../game/LobbyView";
@@ -214,6 +214,23 @@ export default function GameRoom() {
     finally { setBusy(false); }
   }
 
+  // Start a fresh table with the same settings and re-invite the same group.
+  async function playAgain() {
+    setError(""); setBusy(true);
+    try {
+      const res = await createGame({
+        mode: game.mode, stake_type: game.stake_type,
+        big_blind: game.big_blind, buy_in: game.buy_in,
+      });
+      const others = players.filter((p) => p.player_id !== user.id && p.profile?.username);
+      for (const p of others) {
+        try { await invitePlayer(res.game_id, p.profile.username); } catch { /* skip */ }
+      }
+      await refreshProfile();
+      navigate(`/g/${res.invite_code}`);
+    } catch (err) { setError(err.message); setBusy(false); }
+  }
+
   async function cancel() {
     if (!window.confirm("Cancel this table for everyone? Chip buy-ins are refunded.")) return;
     setError(""); setBusy(true);
@@ -277,7 +294,8 @@ export default function GameRoom() {
       )}
 
       {game.status === "finished" && (
-        <FinishedView game={game} players={players} me={me} onHome={() => navigate("/")} busy={busy} />
+        <FinishedView game={game} players={players} me={me} onHome={() => navigate("/")} busy={busy}
+          onPlayAgain={playAgain} isHost={isHost} />
       )}
 
       {game.status === "abandoned" && (
