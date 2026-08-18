@@ -314,7 +314,11 @@ export default function GameRoom() {
           <div className="panel" style={{ maxWidth: 380, width: "100%" }} onClick={(e) => e.stopPropagation()}>
             <div className="panelTitle">Leave table?</div>
             <p className="hint" style={{ marginTop: 0 }}>
-              {game.status === "lobby" ? "The hand hasn't started, so your buy-in is returned." : "You can leave between hands."}
+              {game.status === "lobby"
+                ? "The hand hasn't started, so your buy-in is returned."
+                : game.street === "idle"
+                  ? "Your chips are cashed out and you leave the table."
+                  : "Leaving now folds your hand — your remaining chips are cashed out."}
             </p>
             <button className="bigBtn hot" disabled={busy} onClick={doLeave} style={{ marginTop: 8 }}>YES, LEAVE</button>
             <button className="ghost" onClick={() => setConfirmLeave(false)}>NO, STAY</button>
